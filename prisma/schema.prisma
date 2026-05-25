@@ -1,9 +1,169 @@
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
+  // ...existing code...
+  // output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  type      UserType
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum UserType {
+  ADMIN
+  USER
+}
+
+model Loja {
+  id                      String                  @id @default(uuid())
+  name                    LojaName                @unique
+  cnpj                    String                  @unique
+  metasFinanceiras        MetaFinanceira[]
+  metasOperacionais       MetaOperacional[]
+  historicoFinanceiro     HistoricoMetaFinanceira[]
+  historicoOperacional    HistoricoMetaOperacional[]
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+}
+
+enum LojaName {
+  LOJA1
+  LOJA2
+  LOJA3
+  LOJA4
+  LOJA5
+}
+
+// Recurso 1.3: KRs Financeiros (Prosperidade com Segurança)
+model MetaFinanceira {
+  id                 String   @id @default(uuid())
+  trimestre          String   @db.VarChar(10) // "2T26", "3T26"
+  
+  // KR 1: Cartão (%)
+  cartaoAtual        Float?
+  cartaoMeta         Float
+  
+  // KR 2: À Vista (%)
+  avistaAtual        Float?
+  avistaMeta         Float
+  
+  // KR 3: Ticket Médio (R$)
+  ticketAtual        Decimal? @db.Decimal(10, 2)
+  ticketMeta         Decimal  @db.Decimal(10, 2)
+  
+  // KR 4: Inadimplência (%) - defasagem 3 meses
+  inadimplenciaAtual Float?
+  inadimplenciaMeta  Float
+  
+  // Rastreamento do cálculo
+  lastCalculatedAt   DateTime?
+  calculationStatus  String   @default("pending") // pending, success, error
+  errorMessage       String?  @db.Text
+  
+  lojaId             String
+  loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([lojaId, trimestre])
+  @@index([lojaId, trimestre])
+}
+
+// Recurso 1.4: KRs Operacionais (Operar com Excelência)
+model MetaOperacional {
+  id                 String   @id @default(uuid())
+  trimestre          String   @db.VarChar(10)
+  
+  // KR 1: Garantias e Cancelamentos (%)
+  garantiasAtual     Float?
+  garantiasMeta      Float
+  
+  // KR 2: Vendas Luzter (% do total de lentes)
+  luzterAtual        Float?
+  luzterMeta         Float
+  
+  // KR 3: Vendas Binni (% do total de lentes)
+  binniAtual         Float?
+  binniMeta          Float
+  
+  // Rastreamento do cálculo
+  lastCalculatedAt   DateTime?
+  calculationStatus  String   @default("pending")
+  errorMessage       String?  @db.Text
+  
+  lojaId             String
+  loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([lojaId, trimestre])
+  @@index([lojaId, trimestre])
+}
+
+// Histórico de snapshots: Financeiro
+model HistoricoMetaFinanceira {
+  id                 String   @id @default(uuid())
+  trimestre          String   @db.VarChar(10)
+  
+  // KRs no momento do snapshot
+  cartaoAtual        Float?
+  cartaoMeta         Float
+  avistaAtual        Float?
+  avistaMeta         Float
+  ticketAtual        Decimal? @db.Decimal(10, 2)
+  ticketMeta         Decimal  @db.Decimal(10, 2)
+  inadimplenciaAtual Float?
+  inadimplenciaMeta  Float
+  
+  // Status do cálculo
+  calculationStatus  String
+  errorMessage       String?  @db.Text
+  
+  lojaId             String
+  loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  
+  // Quando este snapshot foi criado
+  snapshotEm         DateTime @default(now())
+
+  @@index([lojaId, trimestre])
+  @@index([snapshotEm])
+}
+
+// Histórico de snapshots: Operacional
+model HistoricoMetaOperacional {
+  id                 String   @id @default(uuid())
+  trimestre          String   @db.VarChar(10)
+  
+  // KRs no momento do snapshot
+  garantiasAtual     Float?
+  garantiasMeta      Float
+  luzterAtual        Float?
+  luzterMeta         Float
+  binniAtual         Float?
+  binniMeta          Float
+  
+  // Status do cálculo
+  calculationStatus  String
+  errorMessage       String?  @db.Text
+  
+  lojaId             String
+  loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  
+  // Quando este snapshot foi criado
+  snapshotEm         DateTime @default(now())
+
+  @@index([lojaId, trimestre])
+  @@index([snapshotEm])
 }

@@ -1,8 +1,6 @@
 
 generator client {
   provider = "prisma-client-js"
-  // ...existing code...
-  // output   = "../generated/prisma"
 }
 
 datasource db {
@@ -15,66 +13,70 @@ model User {
   email     String   @unique
   password  String
   type      UserType
+  lojaId    String?
+  loja      Loja?    @relation(fields: [lojaId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 enum UserType {
-  ADMIN
-  USER
+  USER     // visualiza somente a loja vinculada
+  ADMIN_3  // visualiza todas as lojas (leitura)
+  ADMIN_2  // ADMIN_3 + gerencia metas
+  ADMIN_1  // ADMIN_2 + gerencia usuários
 }
 
 model Loja {
-  id                      String                  @id @default(uuid())
-  name                    LojaName                @unique
-  cnpj                    String                  @unique
+  id                      String                    @id @default(uuid())
+  name                    String
+  cnpj                    String                    @unique
+  codigoLicenca           String?
+  cidade                  String?
+  endereco                String?
+  usuarios                User[]
   metasFinanceiras        MetaFinanceira[]
   metasOperacionais       MetaOperacional[]
   historicoFinanceiro     HistoricoMetaFinanceira[]
   historicoOperacional    HistoricoMetaOperacional[]
-  createdAt               DateTime                @default(now())
-  updatedAt               DateTime                @updatedAt
-}
-
-enum LojaName {
-  LOJA1
-  LOJA2
-  LOJA3
-  LOJA4
-  LOJA5
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
 }
 
 // Recurso 1.3: KRs Financeiros (Prosperidade com Segurança)
 model MetaFinanceira {
   id                 String   @id @default(uuid())
-  trimestre          String   @db.VarChar(10) // "2T26", "3T26"
-  
+  trimestre          String   @db.VarChar(10)
+
   // KR 1: Cartão (%)
   cartaoAtual        Float?
   cartaoMeta         Float
-  
+
   // KR 2: À Vista (%)
   avistaAtual        Float?
   avistaMeta         Float
-  
+
   // KR 3: Ticket Médio (R$)
   ticketAtual        Decimal? @db.Decimal(10, 2)
   ticketMeta         Decimal  @db.Decimal(10, 2)
-  
+
   // KR 4: Inadimplência (%) - defasagem 3 meses
   inadimplenciaAtual Float?
   inadimplenciaMeta  Float
-  
+
+  // Totalizadores do KPI strip
+  totalVendas        Int?
+  valorTotal         Decimal? @db.Decimal(14, 2)
+
   // Rastreamento do cálculo
   lastCalculatedAt   DateTime?
-  calculationStatus  String   @default("pending") // pending, success, error
-  errorMessage       String?  @db.Text
-  
+  calculationStatus  String    @default("pending")
+  errorMessage       String?   @db.Text
+
   lojaId             String
-  loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  loja               Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@unique([lojaId, trimestre])
   @@index([lojaId, trimestre])
@@ -84,29 +86,41 @@ model MetaFinanceira {
 model MetaOperacional {
   id                 String   @id @default(uuid())
   trimestre          String   @db.VarChar(10)
-  
+
   // KR 1: Garantias e Cancelamentos (%)
   garantiasAtual     Float?
-  garantiasMeta      Float
-  
-  // KR 2: Vendas Luzter (% do total de lentes)
+  garantiasMeta      Float    @default(5)
+  garantiasQtd       Int?
+  garantiasTotal     Int?
+
+  // KR 2: Vendas Luzter (% do faturamento de lentes)
   luzterAtual        Float?
-  luzterMeta         Float
-  
-  // KR 3: Vendas Binni (% do total de lentes)
+  luzterMeta         Float    @default(85)
+  valorLuzter        Float?
+  valorTotalLentes   Float?
+  detalhesLuzter     Json?
+  luzterOutrasPct    Float?
+  luzterOutrasValor  Float?
+
+  // KR 3: Vendas Binni/Volt (% do faturamento de armações)
   binniAtual         Float?
-  binniMeta          Float
-  
+  binniMeta          Float    @default(35)
+  valorBinni         Float?
+  valorTotalArmacoes Float?
+  detalhesBinni      Json?
+  binniOutrasPct     Float?
+  binniOutrasValor   Float?
+
   // Rastreamento do cálculo
   lastCalculatedAt   DateTime?
-  calculationStatus  String   @default("pending")
-  errorMessage       String?  @db.Text
-  
+  calculationStatus  String    @default("pending")
+  errorMessage       String?   @db.Text
+
   lojaId             String
-  loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  loja               Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@unique([lojaId, trimestre])
   @@index([lojaId, trimestre])
@@ -116,8 +130,7 @@ model MetaOperacional {
 model HistoricoMetaFinanceira {
   id                 String   @id @default(uuid())
   trimestre          String   @db.VarChar(10)
-  
-  // KRs no momento do snapshot
+
   cartaoAtual        Float?
   cartaoMeta         Float
   avistaAtual        Float?
@@ -126,15 +139,15 @@ model HistoricoMetaFinanceira {
   ticketMeta         Decimal  @db.Decimal(10, 2)
   inadimplenciaAtual Float?
   inadimplenciaMeta  Float
-  
-  // Status do cálculo
+  totalVendas        Int?
+  valorTotal         Decimal? @db.Decimal(14, 2)
+
   calculationStatus  String
   errorMessage       String?  @db.Text
-  
+
   lojaId             String
   loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  
-  // Quando este snapshot foi criado
+
   snapshotEm         DateTime @default(now())
 
   @@index([lojaId, trimestre])
@@ -145,23 +158,34 @@ model HistoricoMetaFinanceira {
 model HistoricoMetaOperacional {
   id                 String   @id @default(uuid())
   trimestre          String   @db.VarChar(10)
-  
-  // KRs no momento do snapshot
+
   garantiasAtual     Float?
   garantiasMeta      Float
+  garantiasQtd       Int?
+  garantiasTotal     Int?
+
   luzterAtual        Float?
   luzterMeta         Float
+  valorLuzter        Float?
+  valorTotalLentes   Float?
+  detalhesLuzter     Json?
+  luzterOutrasPct    Float?
+  luzterOutrasValor  Float?
+
   binniAtual         Float?
   binniMeta          Float
-  
-  // Status do cálculo
+  valorBinni         Float?
+  valorTotalArmacoes Float?
+  detalhesBinni      Json?
+  binniOutrasPct     Float?
+  binniOutrasValor   Float?
+
   calculationStatus  String
   errorMessage       String?  @db.Text
-  
+
   lojaId             String
   loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  
-  // Quando este snapshot foi criado
+
   snapshotEm         DateTime @default(now())
 
   @@index([lojaId, trimestre])

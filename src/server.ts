@@ -88,6 +88,11 @@ app.get("/debug/ordens", authenticateToken, requireLevel("ADMIN_1"), async (req,
   }
 });
 
-// ── Start ────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3333;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+// ── Start (local dev) ────────────────────────────────────────────────────────
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 3333;
+  app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+}
+
+// Vercel serverless: exporta o app como default
+export default app;

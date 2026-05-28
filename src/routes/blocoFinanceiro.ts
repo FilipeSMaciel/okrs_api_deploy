@@ -121,11 +121,12 @@ async function calcularKRsFinanceiros(cnpj: string, trimestre: string) {
   );
 
   const totalExtrato = registros.reduce((acc, r) => acc + (r.valor ?? 0), 0);
+  // Cartão = somente crédito; débito entra em à vista (junto com dinheiro/PIX)
   const valorCartao  = registros
-    .filter((r) => /cart[aã]o/i.test(r.forma_recebimento?.tipo ?? ""))
+    .filter((r) => /cr[eé]dito/i.test(r.forma_recebimento?.tipo ?? ""))
     .reduce((acc, r) => acc + (r.valor ?? 0), 0);
   const valorAvista  = registros
-    .filter((r) => /dinheiro|pix|outros/i.test(r.forma_recebimento?.tipo ?? ""))
+    .filter((r) => /dinheiro|pix|d[eé]bito|outros/i.test(r.forma_recebimento?.tipo ?? ""))
     .reduce((acc, r) => acc + (r.valor ?? 0), 0);
 
   // ── Vendas: total líquido e ticket médio (igual ao ssOtica) ──────────────────

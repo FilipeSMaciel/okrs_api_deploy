@@ -13,14 +13,16 @@ model User {
   email     String   @unique
   password  String
   type      UserType
-  lojaId    String?
-  loja      Loja?    @relation(fields: [lojaId], references: [id])
-  createdAt DateTime @default(now())
+  lojaId          String?
+  loja            Loja?      @relation(fields: [lojaId], references: [id])
+  lojasRegionais  UserLoja[]
+  createdAt       DateTime   @default(now())
   updatedAt DateTime @updatedAt
 }
 
 enum UserType {
   USER     // visualiza somente a loja vinculada
+  REGIONAL // visualiza somente as lojas atribuídas (múltiplas, só leitura)
   ADMIN_3  // visualiza todas as lojas (leitura)
   ADMIN_2  // ADMIN_3 + gerencia metas
   ADMIN_1  // ADMIN_2 + gerencia usuários
@@ -29,17 +31,29 @@ enum UserType {
 model Loja {
   id                      String                    @id @default(uuid())
   name                    String
+  sigla                   String?                   @unique
   cnpj                    String                    @unique
   codigoLicenca           String?
   cidade                  String?
   endereco                String?
   usuarios                User[]
+  regionais               UserLoja[]
   metasFinanceiras        MetaFinanceira[]
   metasOperacionais       MetaOperacional[]
   historicoFinanceiro     HistoricoMetaFinanceira[]
   historicoOperacional    HistoricoMetaOperacional[]
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
+}
+
+// Tabela de junção: gerente regional ↔ lojas atribuídas
+model UserLoja {
+  userId  String
+  lojaId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loja    Loja   @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@id([userId, lojaId])
 }
 
 // Recurso 1.3: KRs Financeiros (Prosperidade com Segurança)
@@ -54,6 +68,9 @@ model MetaFinanceira {
   // KR 2: À Vista (%)
   avistaAtual        Float?
   avistaMeta         Float
+
+  // KR 2b: Crediário (%) — armazenado, não exibido no dashboard
+  crediarioMeta      Float?
 
   // KR 3: Ticket Médio (R$)
   ticketAtual        Decimal? @db.Decimal(10, 2)
@@ -135,6 +152,7 @@ model HistoricoMetaFinanceira {
   cartaoMeta         Float
   avistaAtual        Float?
   avistaMeta         Float
+  crediarioMeta      Float?
   ticketAtual        Decimal? @db.Decimal(10, 2)
   ticketMeta         Decimal  @db.Decimal(10, 2)
   inadimplenciaAtual Float?

@@ -16,7 +16,7 @@ const prisma  = new PrismaClient({ adapter });
  * Não chama o ssOtica — mostra só o que já foi calculado.
  * Requer ADMIN_3 ou superior.
  */
-router.get("/:trimestre", authenticateToken, requireLevel("ADMIN_3"), async (req, res) => {
+router.get("/:trimestre", authenticateToken, requireLevel("REGIONAL"), async (req, res) => {
   const schema = z.object({
     trimestre: z.string().regex(/^\dT\d{2}$/, "Use formato: 2T26"),
   });
@@ -27,7 +27,9 @@ router.get("/:trimestre", authenticateToken, requireLevel("ADMIN_3"), async (req
   const { trimestre } = parsed.data;
 
   try {
+    const isRegional = req.user!.type === "REGIONAL";
     const lojas = await prisma.loja.findMany({
+      where:   isRegional ? { id: { in: req.user!.lojaIds } } : undefined,
       orderBy: { name: "asc" },
       include: {
         metasFinanceiras:  { where: { trimestre } },

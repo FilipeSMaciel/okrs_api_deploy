@@ -477,23 +477,14 @@ router.post("/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
 });
 
 // POST /consulta/batch/:trimestre  (exige ADMIN_2+)
+// Recalcula todas as lojas preservando as metas já configuradas no banco.
 router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
   const trimestreSchema = z.string().regex(/^\dT\d{2}$/, "Use formato: 2T26");
-  const bodySchema = z.object({
-    cartaoMeta: z.number(),
-    avistaMeta: z.number(),
-    ticketMeta: z.number(),
-    inadimplenciaMeta: z.number(),
-  });
 
   const trimestreParsed = trimestreSchema.safeParse(req.params.trimestre);
   if (!trimestreParsed.success) return res.status(400).json({ error: "Trimestre inválido. Use formato: 2T26" });
 
-  const body = bodySchema.safeParse(req.body);
-  if (!body.success) return res.status(400).json({ error: body.error.flatten() });
-
   const trimestre = trimestreParsed.data;
-  const { cartaoMeta, avistaMeta, ticketMeta, inadimplenciaMeta } = body.data;
 
   const lojas = await prisma.loja.findMany();
   if (!lojas.length) return res.status(404).json({ error: "Nenhuma loja cadastrada." });
@@ -506,13 +497,23 @@ router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
           loja.codigoLicenca ? calcularInadimplencia(loja.codigoLicenca) : Promise.resolve(null),
         ]);
 
+        // Usa metas já configuradas no banco; herda do trimestre mais recente se não existir
+        const metasExistentes = await prisma.metaFinanceira.findUnique({
+          where:  { lojaId_trimestre: { lojaId: loja.id, trimestre } },
+          select: { cartaoMeta: true, avistaMeta: true, ticketMeta: true, inadimplenciaMeta: true },
+        });
+        const metasHerdadas = metasExistentes ?? await prisma.metaFinanceira.findFirst({
+          where:   { lojaId: loja.id },
+          orderBy: { trimestre: 'desc' },
+          select:  { cartaoMeta: true, avistaMeta: true, ticketMeta: true, inadimplenciaMeta: true },
+        });
+
         await prisma.metaFinanceira.upsert({
           where: { lojaId_trimestre: { lojaId: loja.id, trimestre } },
           update: {
             cartaoAtual: kr.cartaoPct, avistaAtual: kr.avistaPct,
             ticketAtual: kr.ticketMedio, inadimplenciaAtual,
             totalVendas: kr.totalVendas, valorTotal: kr.valorTotal,
-            cartaoMeta, avistaMeta, ticketMeta, inadimplenciaMeta,
             lastCalculatedAt: new Date(), calculationStatus: "success", errorMessage: null,
           },
           create: {
@@ -520,7 +521,10 @@ router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
             cartaoAtual: kr.cartaoPct, avistaAtual: kr.avistaPct,
             ticketAtual: kr.ticketMedio, inadimplenciaAtual,
             totalVendas: kr.totalVendas, valorTotal: kr.valorTotal,
-            cartaoMeta, avistaMeta, ticketMeta, inadimplenciaMeta,
+            cartaoMeta:        metasHerdadas?.cartaoMeta        ?? 50,
+            avistaMeta:        metasHerdadas?.avistaMeta        ?? 30,
+            ticketMeta:        metasHerdadas?.ticketMeta        ?? 600,
+            inadimplenciaMeta: metasHerdadas?.inadimplenciaMeta ?? 10,
             lastCalculatedAt: new Date(), calculationStatus: "success",
           },
         });

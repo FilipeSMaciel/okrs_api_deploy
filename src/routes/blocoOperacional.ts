@@ -555,22 +555,13 @@ router.post("/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
  * Força recálculo de todas as lojas em paralelo.
  * Body opcional: { garantiasMeta, luzterMeta, binniMeta }
  */
+// POST /operacional/batch/:trimestre
+// Recalcula todas as lojas preservando as metas já configuradas no banco.
 router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
   const trimestreSchema = z.string().regex(/^\dT\d{2}$/, "Use formato: 2T26");
-  const bodySchema = z.object({
-    garantiasMeta: z.number().optional(),
-    luzterMeta:    z.number().optional(),
-    binniMeta:     z.number().optional(),
-  }).optional();
 
   const trimestreParsed = trimestreSchema.safeParse(req.params.trimestre);
   if (!trimestreParsed.success) return res.status(400).json({ error: "Trimestre inválido. Use formato: 2T26" });
-
-  const body = bodySchema.safeParse(req.body);
-  if (!body.success) return res.status(400).json({ error: body.error.flatten() });
-
-  const trimestre = trimestreParsed.data;
-  const metas = body.data ?? {};
 
   const lojas = await prisma.loja.findMany();
   if (!lojas.length) return res.status(404).json({ error: "Nenhuma loja cadastrada." });
@@ -587,33 +578,41 @@ router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
         const luzter = calcularLuzter(vendas);
         const binni  = calcularBinni(vendas);
 
+        // Usa metas já configuradas no banco; herda do trimestre mais recente se não existir
+        const metasExistentes = await prisma.metaOperacional.findUnique({
+          where:  { lojaId_trimestre: { lojaId: loja.id, trimestre } },
+          select: { garantiasMeta: true, luzterMeta: true, binniMeta: true },
+        });
+        const metasHerdadas = metasExistentes ?? await prisma.metaOperacional.findFirst({
+          where:   { lojaId: loja.id },
+          orderBy: { trimestre: 'desc' },
+          select:  { garantiasMeta: true, luzterMeta: true, binniMeta: true },
+        });
+
         await prisma.metaOperacional.upsert({
           where:  { lojaId_trimestre: { lojaId: loja.id, trimestre } },
           update: {
             garantiasAtual: gC.pct, garantiasQtd: gC.qtd, garantiasTotal: gC.total,
-            garantiasMeta: metas.garantiasMeta ?? META_GARANTIAS,
             luzterAtual: luzter.pct, valorLuzter: luzter.valorLuzter,
             valorTotalLentes: luzter.valorTotalLentes, detalhesLuzter: luzter.detalhes,
             luzterOutrasPct: luzter.outras?.pct ?? null, luzterOutrasValor: luzter.outras?.valor ?? null,
-            luzterMeta: metas.luzterMeta ?? META_LUZTER,
             binniAtual: binni.pct, valorBinni: binni.valorBinni,
             valorTotalArmacoes: binni.valorTotalArmacoes, detalhesBinni: binni.detalhes,
             binniOutrasPct: binni.outras?.pct ?? null, binniOutrasValor: binni.outras?.valor ?? null,
-            binniMeta: metas.binniMeta ?? META_BINNI,
             lastCalculatedAt: new Date(), calculationStatus: "success", errorMessage: null,
           },
           create: {
             lojaId: loja.id, trimestre,
             garantiasAtual: gC.pct, garantiasQtd: gC.qtd, garantiasTotal: gC.total,
-            garantiasMeta: metas.garantiasMeta ?? META_GARANTIAS,
+            garantiasMeta: metasHerdadas?.garantiasMeta ?? META_GARANTIAS,
             luzterAtual: luzter.pct, valorLuzter: luzter.valorLuzter,
             valorTotalLentes: luzter.valorTotalLentes, detalhesLuzter: luzter.detalhes,
             luzterOutrasPct: luzter.outras?.pct ?? null, luzterOutrasValor: luzter.outras?.valor ?? null,
-            luzterMeta: metas.luzterMeta ?? META_LUZTER,
+            luzterMeta: metasHerdadas?.luzterMeta ?? META_LUZTER,
             binniAtual: binni.pct, valorBinni: binni.valorBinni,
             valorTotalArmacoes: binni.valorTotalArmacoes, detalhesBinni: binni.detalhes,
             binniOutrasPct: binni.outras?.pct ?? null, binniOutrasValor: binni.outras?.valor ?? null,
-            binniMeta: metas.binniMeta ?? META_BINNI,
+            binniMeta: metasHerdadas?.binniMeta ?? META_BINNI,
             lastCalculatedAt: new Date(), calculationStatus: "success",
           },
         });

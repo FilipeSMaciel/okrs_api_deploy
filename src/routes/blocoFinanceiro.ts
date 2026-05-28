@@ -129,19 +129,29 @@ async function calcularKRsFinanceiros(cnpj: string, trimestre: string) {
     .filter((r) => /dinheiro|pix|d[eé]bito|outros/i.test(r.forma_recebimento?.tipo ?? ""))
     .reduce((acc, r) => acc + (r.valor ?? 0), 0);
 
-  // ── Vendas: total líquido e ticket médio (igual ao ssOtica) ──────────────────
-  // Cada venda tem itens com valor_total_liquido (já com desconto aplicado)
-  const todasVendas = vendasPorJanela.flat();
-  const qtdVendas   = todasVendas.length;
-  const totalLiquido = todasVendas.reduce((acc, v) => {
-    const vliq = (v.itens ?? []).reduce(
-      (s: number, item: any) => s + (item.valor_total_liquido ?? 0), 0
-    );
-    return acc + vliq;
+  // ── Vendas: total líquido, ticket médio e faturamento recebido no período ─────
+  // valor_liquido está no nível da venda; formas_pagamento[].valor é string
+  const todasVendas  = vendasPorJanela.flat();
+  const qtdVendas    = todasVendas.length;
+
+  // Base para % de pagamento e ticket (Total Líquido = valor total das vendas)
+  const totalLiquido = todasVendas.reduce((acc, v) => acc + (v.valor_liquido ?? 0), 0);
+
+  // Adiantamentos recebidos fora do período: pagamentos com data < início do trimestre
+  // Esses valores foram recebidos antes do período → não compõem o faturamento do período
+  const adiantamentosFora = todasVendas.reduce((acc, v) => {
+    const fora = (v.formas_pagamento ?? [])
+      .filter((p: any) => p.data < inicioTrimestre)
+      .reduce((s: number, p: any) => s + parseFloat(String(p.valor ?? 0)), 0);
+    return acc + fora;
   }, 0);
 
-  // Denominador = faturamento total das vendas (inclui crediário)
-  // Extrato exclui crediário do período → usar totalLiquido como base correta
+  // Faturamento do período = Total Líquido − Adiantamentos fora do período
+  // (igual ao "Total recebido no período" do ssOtica)
+  const valorTotalPeriodo = totalLiquido - adiantamentosFora;
+
+  // Denominador das % = totalLiquido (inclui crediário; confirmado pelo analista)
+  // Ticket médio = totalLiquido / qtd (igual ao ssOtica)
   return {
     inicioTrimestre,
     fimTrimestre,
@@ -149,7 +159,7 @@ async function calcularKRsFinanceiros(cnpj: string, trimestre: string) {
     avistaPct:   totalLiquido > 0 ? +((valorAvista / totalLiquido) * 100).toFixed(2) : 0,
     ticketMedio: qtdVendas > 0 ? +(totalLiquido / qtdVendas).toFixed(2) : 0,
     totalVendas: qtdVendas,
-    valorTotal:  +totalLiquido.toFixed(2),
+    valorTotal:  +valorTotalPeriodo.toFixed(2),
   };
 }
 

@@ -130,12 +130,16 @@ async function calcularKRsFinanceiros(cnpj: string, trimestre: string) {
     .reduce((acc, r) => acc + (r.valor ?? 0), 0);
 
   // ── Vendas: total líquido, ticket médio e faturamento recebido no período ─────
-  // valor_liquido está no nível da venda; formas_pagamento[].valor é string
   const todasVendas  = vendasPorJanela.flat();
   const qtdVendas    = todasVendas.length;
 
-  // Base para % de pagamento e ticket (Total Líquido = valor total das vendas)
-  const totalLiquido = todasVendas.reduce((acc, v) => acc + (v.valor_liquido ?? 0), 0);
+  // Base para % de pagamento e ticket: soma dos itens (igual ao "Total Líquido" do ssOtica)
+  const totalLiquido = todasVendas.reduce((acc, v) => {
+    const vliq = (v.itens ?? []).reduce(
+      (s: number, item: any) => s + (item.valor_total_liquido ?? 0), 0
+    );
+    return acc + vliq;
+  }, 0);
 
   // Adiantamentos recebidos fora do período: pagamentos com data < início do trimestre
   // Esses valores foram recebidos antes do período → não compõem o faturamento do período

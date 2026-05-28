@@ -13,11 +13,13 @@ model User {
   email     String   @unique
   password  String
   type      UserType
-  lojaId          String?
-  loja            Loja?      @relation(fields: [lojaId], references: [id])
-  lojasRegionais  UserLoja[]
-  createdAt       DateTime   @default(now())
-  updatedAt DateTime @updatedAt
+  lojaId         String?
+  loja           Loja?      @relation(fields: [lojaId], references: [id])
+  lojasRegionais UserLoja[]
+  regiaoId       String?
+  regiao         Regiao?    @relation(fields: [regiaoId], references: [id])
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 }
 
 enum UserType {
@@ -38,6 +40,7 @@ model Loja {
   endereco                String?
   usuarios                User[]
   regionais               UserLoja[]
+  regioes                 RegiaoLoja[]
   metasFinanceiras        MetaFinanceira[]
   metasOperacionais       MetaOperacional[]
   historicoFinanceiro     HistoricoMetaFinanceira[]
@@ -54,6 +57,24 @@ model UserLoja {
   loja    Loja   @relation(fields: [lojaId], references: [id], onDelete: Cascade)
 
   @@id([userId, lojaId])
+}
+
+// Grupos de lojas (regiões) para gerentes regionais
+model Regiao {
+  id        String      @id @default(uuid())
+  nome      String      @unique
+  lojas     RegiaoLoja[]
+  users     User[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+model RegiaoLoja {
+  regiaoId String
+  lojaId   String
+  regiao   Regiao @relation(fields: [regiaoId], references: [id], onDelete: Cascade)
+  loja     Loja   @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  @@id([regiaoId, lojaId])
 }
 
 // Recurso 1.3: KRs Financeiros (Prosperidade com Segurança)

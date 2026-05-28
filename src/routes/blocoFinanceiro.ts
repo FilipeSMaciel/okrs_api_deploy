@@ -140,11 +140,13 @@ async function calcularKRsFinanceiros(cnpj: string, trimestre: string) {
     return acc + vliq;
   }, 0);
 
+  // Denominador = faturamento total das vendas (inclui crediário)
+  // Extrato exclui crediário do período → usar totalLiquido como base correta
   return {
     inicioTrimestre,
     fimTrimestre,
-    cartaoPct:   totalExtrato > 0 ? +((valorCartao / totalExtrato) * 100).toFixed(2) : 0,
-    avistaPct:   totalExtrato > 0 ? +((valorAvista / totalExtrato) * 100).toFixed(2) : 0,
+    cartaoPct:   totalLiquido > 0 ? +((valorCartao / totalLiquido) * 100).toFixed(2) : 0,
+    avistaPct:   totalLiquido > 0 ? +((valorAvista / totalLiquido) * 100).toFixed(2) : 0,
     ticketMedio: qtdVendas > 0 ? +(totalLiquido / qtdVendas).toFixed(2) : 0,
     totalVendas: qtdVendas,
     valorTotal:  +totalLiquido.toFixed(2),
@@ -174,6 +176,53 @@ async function calcularInadimplencia(codigoLicenca: string): Promise<number | nu
 
   return +((numerador / denominador) * 100).toFixed(2);
 }
+
+/**
+ * GET /consulta/explorar/:trimestre?cnpj=...
+ * Retorna a estrutura bruta de 1 venda da API para inspecionar campos disponíveis.
+ * Nunca usa cache. Útil para diagnóstico.
+ */
+router.get("/explorar/:trimestre", async (req, res) => {
+  const schema = z.object({
+    cnpj:      z.string().min(14).max(18),
+    trimestre: z.string().regex(/^\dT\d{2}$/),
+  });
+  const parsed = schema.safeParse({ cnpj: req.query.cnpj, trimestre: req.params.trimestre });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const { cnpj, trimestre } = parsed.data;
+
+  try {
+    const janelas = trimestreToJanelas(trimestre);
+    // Pega só o 1º mês para ser rápido
+    const vendas = await fetchVendas(cnpj, janelas[0].inicio, janelas[0].fim);
+
+    if (!vendas.length) return res.json({ total: 0, amostra: null });
+
+    // Mostra campos do objeto venda (sem os itens completos para não encher)
+    const amostra = vendas.slice(0, 3).map((v) => {
+      const { itens, ...resto } = v;
+      return {
+        ...resto,
+        itens_qtd: (itens ?? []).length,
+        item_amostra: (itens ?? [])[0] ?? null,
+      };
+    });
+
+    // Campos disponíveis no nível da venda
+    const camposVenda  = Object.keys(vendas[0]).filter(k => k !== 'itens');
+    const camposItem   = Object.keys((vendas[0]?.itens ?? [])[0] ?? {});
+
+    return res.json({
+      total:        vendas.length,
+      camposVenda,
+      camposItem,
+      amostra,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /consulta/:trimestre?cnpj=...
 // DB-first: retorna do cache se disponível e fresco.

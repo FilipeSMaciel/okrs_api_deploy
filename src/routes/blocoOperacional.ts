@@ -93,17 +93,28 @@ async function fetchOSTrimestre(cnpj: string, trimestre: string): Promise<any[]>
 
 // ─── Cálculo dos KRs ────────────────────────────────────────────────────────
 
-function calcularGarantiasCancelamentos(ordens: any[]): { pct: number | null; qtd: number; total: number } {
-  const oticas = ordens.filter((os) => os.tipo_os === "Venda Ótica" || os.tipo_os === "Garantia");
-  const total = oticas.length;
-  if (total === 0) return { pct: null, qtd: 0, total };
+// Fórmula:
+//   Numerador   = OS tipo=Garantia (status ≠ CANCELADA) + OS status=CANCELADA (qualquer tipo)
+//   Denominador = OS tipo=Venda Ótica
+function calcularGarantiasCancelamentos(
+  ordens: any[],
+  _vendas: any[],
+): { pct: number | null; qtd: number; total: number } {
+  const garantiasNaoCanceladas = ordens.filter(
+    (os) => os.tipo_os === "Garantia" && os.status !== "CANCELADA",
+  );
+  const canceladas = ordens.filter((os) => os.status === "CANCELADA");
+  const vendasOtica = ordens.filter((os) => os.tipo_os === "Venda Ótica");
 
-  const garantias = oticas.filter((os) => os.tipo_os === "Garantia");
+  const numerador   = garantiasNaoCanceladas.length + canceladas.length;
+  const denominador = vendasOtica.length;
+
+  if (denominador === 0) return { pct: null, qtd: numerador, total: 0 };
 
   return {
-    pct: +((garantias.length / total) * 100).toFixed(2),
-    qtd: garantias.length,
-    total,
+    pct:   +((numerador / denominador) * 100).toFixed(2),
+    qtd:   numerador,
+    total: denominador,
   };
 }
 
@@ -143,7 +154,9 @@ function calcularLuzter(vendas: any[]): any {
   };
 }
 
-const GRUPOS_ARMACAO = ["Armação Acetato", "Armação Metal"];
+const GRUPOS_ARMACAO = ["Armação Acetato", "Armação Metal", "Solar Acetato", "Solar Metal"];
+
+const isBinniVolt = (grife: string) => /^binni/i.test(grife) || grife === "Volt";
 
 function calcularBinni(vendas: any[]): any {
   const armacoes = vendas.flatMap((v) =>
@@ -151,36 +164,55 @@ function calcularBinni(vendas: any[]): any {
   );
 
   const totalArmacoes = armacoes.reduce((acc, item) => acc + (item.valor_total_liquido ?? 0), 0);
-  if (totalArmacoes === 0) return { pct: null, valorBinni: 0, valorTotalArmacoes: 0, outras: null, detalhes: [] };
-
-  const isGrupo = (grife: string) => /^binni/i.test(grife) || grife === "Volt";
+  if (totalArmacoes === 0) return { pct: null, valorBinni: 0, valorTotalArmacoes: 0, outras: null, detalhes: [], porGrupo: {} };
 
   const valorBinni = armacoes
-    .filter((item) => isGrupo(item.produto?.grife ?? ""))
+    .filter((item) => isBinniVolt(item.produto?.grife ?? ""))
     .reduce((acc, item) => acc + (item.valor_total_liquido ?? 0), 0);
 
   const pctBinni = +((valorBinni / totalArmacoes) * 100).toFixed(2);
 
-  const porGrifeGrupo = new Map<string, number>();
-  for (const item of armacoes.filter((i) => isGrupo(i.produto?.grife ?? ""))) {
-    const grife = item.produto?.grife ?? "Sem Grife";
-    porGrifeGrupo.set(grife, (porGrifeGrupo.get(grife) ?? 0) + (item.valor_total_liquido ?? 0));
+  // Detalhes globais por grife (para compatibilidade)
+  const grifeMap = new Map<string, number>();
+  for (const item of armacoes.filter((i) => isBinniVolt(i.produto?.grife ?? ""))) {
+    const g = item.produto?.grife ?? "Sem Grife";
+    grifeMap.set(g, (grifeMap.get(g) ?? 0) + (item.valor_total_liquido ?? 0));
   }
-
-  const detalhesGrupo = Array.from(porGrifeGrupo.entries())
-    .map(([grife, valor]) => ({
-      grife,
-      valor: +valor.toFixed(2),
-      pct: +((valor / totalArmacoes) * 100).toFixed(2),
-    }))
+  const detalhes = Array.from(grifeMap.entries())
+    .map(([grife, valor]) => ({ grife, valor: +valor.toFixed(2), pct: +((valor / totalArmacoes) * 100).toFixed(2) }))
     .sort((a, b) => b.valor - a.valor);
+
+  // Detalhes por grupo de produto (para filtro interativo no frontend)
+  const porGrupo: Record<string, any> = {};
+  for (const grupo of GRUPOS_ARMACAO) {
+    const itensGrupo = armacoes.filter((item) => item.produto?.grupo === grupo);
+    const valorTotalGrupo = itensGrupo.reduce((acc, item) => acc + (item.valor_total_liquido ?? 0), 0);
+    const itensBinniGrupo = itensGrupo.filter((item) => isBinniVolt(item.produto?.grife ?? ""));
+    const valorBinniGrupo = itensBinniGrupo.reduce((acc, item) => acc + (item.valor_total_liquido ?? 0), 0);
+
+    const grifeGrupoMap = new Map<string, number>();
+    for (const item of itensBinniGrupo) {
+      const g = item.produto?.grife ?? "Sem Grife";
+      grifeGrupoMap.set(g, (grifeGrupoMap.get(g) ?? 0) + (item.valor_total_liquido ?? 0));
+    }
+
+    porGrupo[grupo] = {
+      valorTotal:  +valorTotalGrupo.toFixed(2),
+      valorBinni:  +valorBinniGrupo.toFixed(2),
+      outrasValor: +(valorTotalGrupo - valorBinniGrupo).toFixed(2),
+      items: Array.from(grifeGrupoMap.entries())
+        .map(([grife, valor]) => ({ grife, valor: +valor.toFixed(2) }))
+        .sort((a, b) => b.valor - a.valor),
+    };
+  }
 
   return {
     pct: pctBinni,
-    valorBinni: +valorBinni.toFixed(2),
+    valorBinni:         +valorBinni.toFixed(2),
     valorTotalArmacoes: +totalArmacoes.toFixed(2),
     outras: { pct: +(100 - pctBinni).toFixed(2), valor: +(totalArmacoes - valorBinni).toFixed(2) },
-    detalhes: detalhesGrupo,
+    detalhes,
+    porGrupo,
   };
 }
 
@@ -202,15 +234,21 @@ function cacheToOperacional(c: any) {
         : null,
       detalhes: (c.detalhesLuzter as any[]) ?? [],
     },
-    binni: {
-      pct:               c.binniAtual,
-      valorBinni:        c.valorBinni         ?? 0,
-      valorTotalArmacoes: c.valorTotalArmacoes ?? 0,
-      outras: c.binniOutrasPct != null
-        ? { pct: c.binniOutrasPct, valor: c.binniOutrasValor ?? 0 }
-        : null,
-      detalhes: (c.detalhesBinni as any[]) ?? [],
-    },
+    binni: (() => {
+      const raw = c.detalhesBinni as any;
+      const detalhes = Array.isArray(raw) ? raw : (raw?.items ?? []);
+      const porGrupo = Array.isArray(raw) ? null : (raw?.porGrupo ?? null);
+      return {
+        pct:               c.binniAtual,
+        valorBinni:        c.valorBinni          ?? 0,
+        valorTotalArmacoes: c.valorTotalArmacoes ?? 0,
+        outras: c.binniOutrasPct != null
+          ? { pct: c.binniOutrasPct, valor: c.binniOutrasValor ?? 0 }
+          : null,
+        detalhes,
+        porGrupo,
+      };
+    })(),
   };
 }
 
@@ -277,6 +315,64 @@ router.get("/explorar/:trimestre", async (req, res) => {
 });
 
 /**
+ * GET /operacional/garantias-spike/:trimestre?cnpj=...
+ * Spike de validação: filtra OS com Tipo=Garantia e Situação=Entregue|Não Entregue
+ * e calcula pct sobre COUNT de vendas do período. Nunca usa cache.
+ * Retorna diagnóstico completo para confirmar campos e fórmula.
+ */
+router.get("/garantias-spike/:trimestre", async (req, res) => {
+  const schema = z.object({
+    cnpj:      z.string().min(14).max(18),
+    trimestre: z.string().regex(/^\dT\d{2}$/),
+  });
+
+  const parsed = schema.safeParse({ cnpj: req.query.cnpj, trimestre: req.params.trimestre });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const { cnpj, trimestre } = parsed.data;
+
+  // API ssOtica usa uppercase: ENTREGUE = Entregue, ABERTO = Não Entregue
+  const SITUACOES_ALVO = ["ENTREGUE", "ABERTO"];
+
+  try {
+    const [ordens, vendas] = await Promise.all([
+      fetchOSTrimestre(cnpj, trimestre),
+      fetchVendasTrimestre(cnpj, trimestre),
+    ]);
+
+    const garantiasNaoCanceladas = ordens.filter(
+      (os) => os.tipo_os === "Garantia" && os.status !== "CANCELADA",
+    );
+    const canceladas  = ordens.filter((os) => os.status === "CANCELADA");
+    const vendasOtica = ordens.filter((os) => os.tipo_os === "Venda Ótica");
+
+    const numerador   = garantiasNaoCanceladas.length + canceladas.length;
+    const denominador = vendasOtica.length;
+    const pct = denominador > 0 ? +((numerador / denominador) * 100).toFixed(2) : null;
+
+    return res.json({
+      cnpj,
+      trimestre,
+      formula: "(OS tipo=Garantia não canceladas + OS canceladas qualquer tipo) / OS tipo=Venda Ótica",
+      resultado: { numerador, denominador, pct },
+      diagnostico: {
+        totalOS:                ordens.length,
+        garantiasNaoCanceladas: garantiasNaoCanceladas.length,
+        canceladas:             canceladas.length,
+        vendasOtica:            vendasOtica.length,
+        combinacoes: [
+          ...new Map(
+            ordens.map((os) => [`${os.tipo_os}|${os.status}`, { tipo_os: os.tipo_os, status: os.status }])
+          ).values(),
+        ],
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /operacional/:trimestre?cnpj=...
  * DB-first: retorna do cache se disponível e fresco.
  * Recalcula via ssOtica apenas quando necessário e salva no banco.
@@ -322,7 +418,7 @@ router.get("/:trimestre", async (req, res) => {
       fetchVendasTrimestre(cnpj, trimestre),
     ]);
 
-    const gC     = calcularGarantiasCancelamentos(ordens);
+    const gC     = calcularGarantiasCancelamentos(ordens, vendas);
     const luzter = calcularLuzter(vendas);
     const binni  = calcularBinni(vendas);
 
@@ -339,7 +435,7 @@ router.get("/:trimestre", async (req, res) => {
       binniAtual:         binni.pct,
       valorBinni:         binni.valorBinni,
       valorTotalArmacoes: binni.valorTotalArmacoes,
-      detalhesBinni:      binni.detalhes,
+      detalhesBinni:      { items: binni.detalhes, porGrupo: binni.porGrupo },
       binniOutrasPct:     binni.outras?.pct   ?? null,
       binniOutrasValor:   binni.outras?.valor ?? null,
       lastCalculatedAt:   new Date(),
@@ -480,7 +576,7 @@ router.post("/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
       fetchVendasTrimestre(cnpj, trimestre),
     ]);
 
-    const gC     = calcularGarantiasCancelamentos(ordens);
+    const gC     = calcularGarantiasCancelamentos(ordens, vendas);
     const luzter = calcularLuzter(vendas);
     const binni  = calcularBinni(vendas);
 
@@ -501,7 +597,7 @@ router.post("/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
         binniAtual:         binni.pct,
         valorBinni:         binni.valorBinni,
         valorTotalArmacoes: binni.valorTotalArmacoes,
-        detalhesBinni:      binni.detalhes,
+        detalhesBinni:      { items: binni.detalhes, porGrupo: binni.porGrupo },
         binniOutrasPct:     binni.outras?.pct   ?? null,
         binniOutrasValor:   binni.outras?.valor ?? null,
         binniMeta:          metas.binniMeta ?? META_BINNI,
@@ -526,7 +622,7 @@ router.post("/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
         binniAtual:         binni.pct,
         valorBinni:         binni.valorBinni,
         valorTotalArmacoes: binni.valorTotalArmacoes,
-        detalhesBinni:      binni.detalhes,
+        detalhesBinni:      { items: binni.detalhes, porGrupo: binni.porGrupo },
         binniOutrasPct:     binni.outras?.pct   ?? null,
         binniOutrasValor:   binni.outras?.valor ?? null,
         binniMeta:          metas.binniMeta ?? META_BINNI,
@@ -563,6 +659,8 @@ router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
   const trimestreParsed = trimestreSchema.safeParse(req.params.trimestre);
   if (!trimestreParsed.success) return res.status(400).json({ error: "Trimestre inválido. Use formato: 2T26" });
 
+  const trimestre = trimestreParsed.data;
+
   const lojas = await prisma.loja.findMany();
   if (!lojas.length) return res.status(404).json({ error: "Nenhuma loja cadastrada." });
 
@@ -574,7 +672,7 @@ router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
           fetchVendasTrimestre(loja.cnpj, trimestre),
         ]);
 
-        const gC     = calcularGarantiasCancelamentos(ordens);
+        const gC     = calcularGarantiasCancelamentos(ordens, vendas);
         const luzter = calcularLuzter(vendas);
         const binni  = calcularBinni(vendas);
 
@@ -597,7 +695,7 @@ router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
             valorTotalLentes: luzter.valorTotalLentes, detalhesLuzter: luzter.detalhes,
             luzterOutrasPct: luzter.outras?.pct ?? null, luzterOutrasValor: luzter.outras?.valor ?? null,
             binniAtual: binni.pct, valorBinni: binni.valorBinni,
-            valorTotalArmacoes: binni.valorTotalArmacoes, detalhesBinni: binni.detalhes,
+            valorTotalArmacoes: binni.valorTotalArmacoes, detalhesBinni: { items: binni.detalhes, porGrupo: binni.porGrupo },
             binniOutrasPct: binni.outras?.pct ?? null, binniOutrasValor: binni.outras?.valor ?? null,
             lastCalculatedAt: new Date(), calculationStatus: "success", errorMessage: null,
           },
@@ -610,7 +708,7 @@ router.post("/batch/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
             luzterOutrasPct: luzter.outras?.pct ?? null, luzterOutrasValor: luzter.outras?.valor ?? null,
             luzterMeta: metasHerdadas?.luzterMeta ?? META_LUZTER,
             binniAtual: binni.pct, valorBinni: binni.valorBinni,
-            valorTotalArmacoes: binni.valorTotalArmacoes, detalhesBinni: binni.detalhes,
+            valorTotalArmacoes: binni.valorTotalArmacoes, detalhesBinni: { items: binni.detalhes, porGrupo: binni.porGrupo },
             binniOutrasPct: binni.outras?.pct ?? null, binniOutrasValor: binni.outras?.valor ?? null,
             binniMeta: metasHerdadas?.binniMeta ?? META_BINNI,
             lastCalculatedAt: new Date(), calculationStatus: "success",

@@ -105,35 +105,12 @@ async function calcularKRsFinanceiros(cnpj: string, trimestre: string) {
   const inicioTrimestre = janelas[0].inicio;
   const fimTrimestre    = janelas[2].fim;
 
-  // Busca extrato (forma de pagamento) e vendas (valor líquido) em paralelo
-  const [extratosPorJanela, vendasPorJanela] = await Promise.all([
-    Promise.all(janelas.map((j) => fetchExtrato(cnpj, j.inicio, j.fim))),
-    Promise.all(janelas.map((j) => fetchVendas(cnpj, j.inicio, j.fim))),
-  ]);
+  // Busca apenas vendas — o extrato não é mais necessário
+  const vendasPorJanela = await Promise.all(janelas.map((j) => fetchVendas(cnpj, j.inicio, j.fim)));
+  const todasVendas     = vendasPorJanela.flat();
+  const qtdVendas       = todasVendas.length;
 
-  // ── Extrato: formas de pagamento ─────────────────────────────────────────────
-  const registros = extratosPorJanela.flat().filter(
-    (r) =>
-      r.tipo === "CREDITO" &&
-      r.categoria?.descricao === "Vendas" &&
-      r.data_operacao >= inicioTrimestre &&
-      r.data_operacao <= fimTrimestre
-  );
-
-  const totalExtrato = registros.reduce((acc, r) => acc + (r.valor ?? 0), 0);
-  // Cartão = somente crédito; débito entra em à vista (junto com dinheiro/PIX)
-  const valorCartao  = registros
-    .filter((r) => /cr[eé]dito/i.test(r.forma_recebimento?.tipo ?? ""))
-    .reduce((acc, r) => acc + (r.valor ?? 0), 0);
-  const valorAvista  = registros
-    .filter((r) => /dinheiro|pix|d[eé]bito|outros/i.test(r.forma_recebimento?.tipo ?? ""))
-    .reduce((acc, r) => acc + (r.valor ?? 0), 0);
-
-  // ── Vendas: total líquido, ticket médio e faturamento recebido no período ─────
-  const todasVendas  = vendasPorJanela.flat();
-  const qtdVendas    = todasVendas.length;
-
-  // Base para % de pagamento e ticket: soma dos itens (igual ao "Total Líquido" do ssOtica)
+  // ── Total líquido dos itens (base para ticket médio e faturamento) ────────────
   const totalLiquido = todasVendas.reduce((acc, v) => {
     const vliq = (v.itens ?? []).reduce(
       (s: number, item: any) => s + (item.valor_total_liquido ?? 0), 0
@@ -141,27 +118,31 @@ async function calcularKRsFinanceiros(cnpj: string, trimestre: string) {
     return acc + vliq;
   }, 0);
 
-  // Adiantamentos recebidos fora do período: pagamentos com data < início do trimestre
-  // Esses valores foram recebidos antes do período → não compõem o faturamento do período
-  const adiantamentosFora = todasVendas.reduce((acc, v) => {
-    const fora = (v.formas_pagamento ?? [])
-      .filter((p: any) => p.data < inicioTrimestre)
-      .reduce((s: number, p: any) => s + parseFloat(String(p.valor ?? 0)), 0);
-    return acc + fora;
-  }, 0);
+  // ── Formas de pagamento: classifica por descrição ─────────────────────────────
+  // Campo: formas_pagamento[].forma_pagamento
+  // Padrão: "Cartao de Credito Visa - (Credito)" / "Pix Qrcode - (A Vista)" / "Crediário Digital"
+  const todasFormas = todasVendas.flatMap((v) => v.formas_pagamento ?? []);
 
-  // Faturamento do período = Total Líquido − Adiantamentos fora do período
-  // (igual ao "Total recebido no período" do ssOtica)
+  // Exclui adiantamentos (pagamentos recebidos antes do período)
+  const formasNoPeriodo = todasFormas.filter((p: any) => p.data >= inicioTrimestre);
+
+  const somarFormas = (formas: any[]) =>
+    formas.reduce((acc: number, p: any) => acc + parseFloat(String(p.valor ?? 0)), 0);
+
+  const totalFormas  = somarFormas(formasNoPeriodo);
+  const valorCartao  = somarFormas(formasNoPeriodo.filter((p: any) => /\(cr[eé]dito\)/i.test(p.forma_pagamento ?? "")));
+  const valorAvista  = somarFormas(formasNoPeriodo.filter((p: any) => /\(a\s*vista\)/i.test(p.forma_pagamento ?? "")));
+
+  // ── Faturamento = total líquido − adiantamentos recebidos fora do período ─────
+  const adiantamentosFora = somarFormas(todasFormas.filter((p: any) => p.data < inicioTrimestre));
   const valorTotalPeriodo = totalLiquido - adiantamentosFora;
 
-  // Denominador das % = totalLiquido (inclui crediário; confirmado pelo analista)
-  // Ticket médio = totalLiquido / qtd (igual ao ssOtica)
   return {
     inicioTrimestre,
     fimTrimestre,
-    cartaoPct:   totalLiquido > 0 ? +((valorCartao / totalLiquido) * 100).toFixed(2) : 0,
-    avistaPct:   totalLiquido > 0 ? +((valorAvista / totalLiquido) * 100).toFixed(2) : 0,
-    ticketMedio: qtdVendas > 0 ? +(totalLiquido / qtdVendas).toFixed(2) : 0,
+    cartaoPct:   totalFormas > 0 ? +((valorCartao / totalFormas) * 100).toFixed(2) : 0,
+    avistaPct:   totalFormas > 0 ? +((valorAvista / totalFormas) * 100).toFixed(2) : 0,
+    ticketMedio: qtdVendas > 0   ? +(totalLiquido / qtdVendas).toFixed(2)           : 0,
     totalVendas: qtdVendas,
     valorTotal:  +valorTotalPeriodo.toFixed(2),
   };
@@ -224,13 +205,25 @@ router.get("/explorar/:trimestre", async (req, res) => {
     });
 
     // Campos disponíveis no nível da venda
-    const camposVenda  = Object.keys(vendas[0]).filter(k => k !== 'itens');
-    const camposItem   = Object.keys((vendas[0]?.itens ?? [])[0] ?? {});
+    const camposVenda        = Object.keys(vendas[0]).filter(k => k !== 'itens');
+    const camposItem         = Object.keys((vendas[0]?.itens ?? [])[0] ?? {});
+    const formasSample       = vendas.flatMap(v => v.formas_pagamento ?? []).slice(0, 10);
+    const camposFormas       = formasSample[0] ? Object.keys(formasSample[0]) : [];
+
+    // Valores únicos dos campos que parecem ser "tipo" de pagamento
+    const tiposFormas: Record<string, string[]> = {};
+    for (const campo of camposFormas) {
+      const vals = [...new Set(formasSample.map((f: any) => String(f[campo] ?? '')).filter(Boolean))];
+      if (vals.length > 0 && vals.length <= 20) tiposFormas[campo] = vals;
+    }
 
     return res.json({
       total:        vendas.length,
       camposVenda,
       camposItem,
+      camposFormas,
+      tiposFormas,
+      formasSample,
       amostra,
     });
   } catch (err: any) {

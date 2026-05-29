@@ -73,8 +73,13 @@ router.post("/login", async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: "Email ou senha incorretos." });
 
-    const lojaIds   = user.lojasRegionais.map((ul: any) => ul.lojaId);
-    const lojaCnpjs = user.lojasRegionais.map((ul: any) => ul.loja.cnpj);
+    // Usa região se atribuída, senão usa lojas diretas (mesmo critério do formatUser)
+    const lojasDoToken = user.regiao
+      ? user.regiao.lojas.map((rl: any) => rl.loja)
+      : user.lojasRegionais.map((ul: any) => ul.loja);
+
+    const lojaIds   = lojasDoToken.map((l: any) => l.id);
+    const lojaCnpjs = lojasDoToken.map((l: any) => l.cnpj);
 
     const token = jwt.sign(
       {

@@ -96,6 +96,20 @@ router.post("/login", async (req, res) => {
       { expiresIn: "8h" }
     );
 
+    // Log login (non-blocking)
+    void prisma.userEvent.create({
+      data: {
+        userId: user.id,
+        action: 'LOGIN',
+        payload: {
+          userType:  user.type,
+          lojaId:    user.lojaId    ?? null,
+          lojaNome:  user.loja?.name ?? null,
+          lojaCnpj:  user.loja?.cnpj ?? null,
+        },
+      },
+    }).catch(() => {});
+
     return res.json({ token, user: formatUser(user) });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -267,8 +281,8 @@ router.put("/users/:id/lojas", authenticateToken, requireLevel("TI"), async (req
   }
 });
 
-// ─── GET /auth/regioes  (TI) ────────────────────────────────────────────────
-router.get("/regioes", authenticateToken, requireLevel("TI"), async (_req, res) => {
+// ─── GET /auth/regioes  (DIRECAO+) ──────────────────────────────────────────
+router.get("/regioes", authenticateToken, requireLevel("DIRECAO"), async (_req, res) => {
   try {
     const regioes = await prisma.regiao.findMany({
       include: { lojas: { include: { loja: { select: LOJA_SELECT } } } },
@@ -359,6 +373,58 @@ router.delete("/users/:id", authenticateToken, requireLevel("TI"), async (req, r
     return res.status(204).send();
   } catch (err: any) {
     if (err.code === "P2025") return res.status(404).json({ error: "Usuário não encontrado." });
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /auth/analytics  (TI) ─────────────────────────────────────────────
+router.get("/analytics", authenticateToken, requireLevel("TI"), async (_req, res) => {
+  try {
+    const seteAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [loginsPorDia, rankingLojas, recentesMetas, ativosHojeRes, metaEdits7d] = await Promise.all([
+      prisma.$queryRaw<{ data: string; total: number }[]>`
+        SELECT TO_CHAR("createdAt", 'YYYY-MM-DD') as data, COUNT(*)::int as total
+        FROM "UserEvent"
+        WHERE action = 'LOGIN' AND "createdAt" >= ${seteAtras}
+        GROUP BY TO_CHAR("createdAt", 'YYYY-MM-DD')
+        ORDER BY data ASC
+      `,
+      prisma.$queryRaw<{ lojaNome: string; cnpj: string; acessos: number }[]>`
+        SELECT payload->>'lojaNome' as "lojaNome", payload->>'lojaCnpj' as cnpj, COUNT(*)::int as acessos
+        FROM "UserEvent"
+        WHERE action = 'LOGIN' AND "createdAt" >= ${seteAtras} AND payload->>'lojaCnpj' IS NOT NULL
+        GROUP BY payload->>'lojaNome', payload->>'lojaCnpj'
+        ORDER BY acessos DESC
+        LIMIT 10
+      `,
+      prisma.userEvent.findMany({
+        where:   { action: 'META_EDIT' },
+        orderBy: { createdAt: 'desc' },
+        take:    15,
+        include: { user: { select: { name: true } } },
+      }),
+      prisma.$queryRaw<{ total: number }[]>`
+        SELECT COUNT(DISTINCT "userId")::int as total FROM "UserEvent"
+        WHERE action = 'LOGIN' AND "createdAt" >= CURRENT_DATE
+      `,
+      prisma.userEvent.count({ where: { action: 'META_EDIT', createdAt: { gte: seteAtras } } }),
+    ]);
+
+    return res.json({
+      loginsPorDia,
+      rankingLojas,
+      recentesMetas: recentesMetas.map(e => ({
+        id:        e.id,
+        userName:  e.user.name,
+        createdAt: e.createdAt,
+        payload:   e.payload,
+      })),
+      ativosHoje:    ativosHojeRes[0]?.total ?? 0,
+      totalLogins7d: loginsPorDia.reduce((a, d) => a + d.total, 0),
+      metaEdits7d,
+    });
+  } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });

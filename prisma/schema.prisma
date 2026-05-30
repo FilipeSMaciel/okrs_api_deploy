@@ -18,6 +18,7 @@ model User {
   lojasRegionais UserLoja[]
   regiaoId       String?
   regiao         Regiao?    @relation(fields: [regiaoId], references: [id])
+  events         UserEvent[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 }
@@ -162,6 +163,26 @@ model MetaOperacional {
 
   @@unique([lojaId, trimestre])
   @@index([lojaId, trimestre])
+}
+
+// ─── Rastreamento de atividades ──────────────────────────────────────────────
+
+enum EventAction {
+  LOGIN
+  PAGE_VIEW
+  META_EDIT
+}
+
+model UserEvent {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    EventAction
+  payload   Json?
+  createdAt DateTime    @default(now())
+
+  @@index([action, createdAt])
+  @@index([userId, createdAt])
 }
 
 // Histórico de snapshots: Financeiro

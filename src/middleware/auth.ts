@@ -37,13 +37,13 @@ declare global {
 
 export function authenticateToken(req: Request, res: Response, next: NextFunction) {
   const auth = req.headers.authorization;
+
   if (!auth?.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Token não fornecido." });
   }
 
   try {
     const payload = jwt.verify(auth.slice(7), process.env.JWT_SECRET!) as AuthUser;
-    // garante que lojaIds/lojaCnpjs existem mesmo em tokens antigos
     if (!payload.lojaIds)   payload.lojaIds   = [];
     if (!payload.lojaCnpjs) payload.lojaCnpjs = [];
     req.user = payload;

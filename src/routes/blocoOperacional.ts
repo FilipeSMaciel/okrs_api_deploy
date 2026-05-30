@@ -15,9 +15,6 @@ const META_GARANTIAS = 5;
 const META_LUZTER    = 85;
 const META_BINNI     = 35;
 
-// Cache TTL: 4 horas para trimestre em curso; trimestre encerrado nunca expira
-const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function trimestreToJanelas(trimestre: string) {
@@ -36,21 +33,8 @@ function trimestreToJanelas(trimestre: string) {
   });
 }
 
-/** Retorna true se o trimestre já encerrou (data fim no passado). */
-function isTrimesterComplete(trimestre: string): boolean {
-  const match = trimestre.match(/^(\d)T(\d{2})$/);
-  if (!match) return false;
-  const q = parseInt(match[1]);
-  const year = 2000 + parseInt(match[2]);
-  const endDate = new Date(year, q * 3, 0); // último dia do último mês
-  return new Date() > endDate;
-}
-
-/** Verifica se o registro do cache ainda é válido. */
-function isCacheFresh(record: { calculationStatus: string; lastCalculatedAt: Date | null } | null, trimestre: string): boolean {
-  if (!record || record.calculationStatus !== "success" || !record.lastCalculatedAt) return false;
-  if (isTrimesterComplete(trimestre)) return true; // trimestre encerrado: não recalcular
-  return Date.now() - record.lastCalculatedAt.getTime() < CACHE_TTL_MS;
+function hasData(record: { calculationStatus: string } | null): boolean {
+  return record?.calculationStatus === "success";
 }
 
 // ─── Fetchers ────────────────────────────────────────────────────────────────
@@ -402,7 +386,7 @@ router.get("/:trimestre", async (req, res) => {
     });
 
     const force = req.query.force === 'true';
-    if (!force && isCacheFresh(cached, trimestre)) {
+    if (!force && hasData(cached)) {
       return res.json({
         cnpj, trimestre,
         loja: lojaOut,
@@ -535,6 +519,14 @@ router.patch("/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
     });
 
     console.log(`[PATCH /operacional] ✓ salvo id=${meta.id}`);
+
+    // Log META_EDIT (non-blocking)
+    if (req.user?.sub) {
+      void prisma.userEvent.create({
+        data: { userId: req.user.sub, action: 'META_EDIT', payload: { cnpj, lojaId: loja.id, lojaNome: loja.name, trimestre, tipo: 'operacional', metas: { garantiasMeta, luzterMeta, binniMeta } } },
+      }).catch(() => {});
+    }
+
     return res.json({ id: meta.id, lojaId: loja.id, trimestre, garantiasMeta, luzterMeta, binniMeta });
   } catch (err: any) {
     console.error(`[PATCH /operacional] ERRO:`, err.message);

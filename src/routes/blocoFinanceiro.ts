@@ -26,22 +26,8 @@ function trimestreToJanelas(trimestre: string) {
   });
 }
 
-// Cache TTL: 4 horas para trimestre em curso; trimestre encerrado nunca expira
-const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
-
-function isTrimesterComplete(trimestre: string): boolean {
-  const match = trimestre.match(/^(\d)T(\d{2})$/);
-  if (!match) return false;
-  const q = parseInt(match[1]);
-  const year = 2000 + parseInt(match[2]);
-  const endDate = new Date(year, q * 3, 0);
-  return new Date() > endDate;
-}
-
-function isCacheFresh(record: { calculationStatus: string; lastCalculatedAt: Date | null } | null, trimestre: string): boolean {
-  if (!record || record.calculationStatus !== "success" || !record.lastCalculatedAt) return false;
-  if (isTrimesterComplete(trimestre)) return true;
-  return Date.now() - record.lastCalculatedAt.getTime() < CACHE_TTL_MS;
+function hasData(record: { calculationStatus: string } | null): boolean {
+  return record?.calculationStatus === "success";
 }
 
 function getMesRefInadimplencia(): { inicio: string; fim: string } {
@@ -250,6 +236,13 @@ router.get("/:trimestre", async (req, res) => {
     const loja = await prisma.loja.findUnique({ where: { cnpj } });
     if (!loja) return res.status(404).json({ error: `Loja com CNPJ ${cnpj} não encontrada.` });
 
+    // Log PAGE_VIEW (non-blocking)
+    if (req.user?.sub) {
+      void prisma.userEvent.create({
+        data: { userId: req.user.sub, action: 'PAGE_VIEW', payload: { cnpj, lojaId: loja.id, lojaNome: loja.name, trimestre } },
+      }).catch(() => {});
+    }
+
     const janelas = trimestreToJanelas(trimestre);
     const lojaOut = { id: loja.id, name: loja.name, cidade: loja.cidade };
     const periodoOut = { inicio: janelas[0].inicio, fim: janelas[2].fim };
@@ -260,7 +253,7 @@ router.get("/:trimestre", async (req, res) => {
     });
 
     const force = req.query.force === 'true';
-    if (!force && isCacheFresh(cached, trimestre)) {
+    if (!force && hasData(cached)) {
       return res.json({
         cnpj, trimestre,
         loja: lojaOut,
@@ -400,6 +393,14 @@ router.patch("/:trimestre", requireLevel("ADMIN_2"), async (req, res) => {
     });
 
     console.log(`[PATCH /consulta] ✓ salvo id=${meta.id}`);
+
+    // Log META_EDIT (non-blocking)
+    if (req.user?.sub) {
+      void prisma.userEvent.create({
+        data: { userId: req.user.sub, action: 'META_EDIT', payload: { cnpj, lojaId: loja.id, lojaNome: loja.name, trimestre, tipo: 'financeiro', metas: { cartaoMeta, avistaMeta, ticketMeta, inadimplenciaMeta } } },
+      }).catch(() => {});
+    }
+
     return res.json({ id: meta.id, lojaId: loja.id, trimestre, cartaoMeta, avistaMeta, ticketMeta, inadimplenciaMeta });
   } catch (err: any) {
     console.error(`[PATCH /consulta] ERRO:`, err.message);

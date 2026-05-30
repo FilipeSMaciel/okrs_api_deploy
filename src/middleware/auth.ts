@@ -2,6 +2,13 @@ import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
 
 export const LEVEL: Record<string, number> = {
+  // Valores novos
+  LOJA:           0,
+  GERENTE:        1,
+  DIRECAO:        2,
+  ADMINISTRATIVO: 3,
+  TI:             4,
+  // Aliases legados — suporte a tokens emitidos antes da migração
   USER:     0,
   REGIONAL: 1,
   ADMIN_3:  2,
@@ -61,7 +68,7 @@ export function requireLojaAccess(req: Request, res: Response, next: NextFunctio
 
   const { type, lojaCnpj, lojaCnpjs } = req.user;
 
-  if (type === "USER") {
+  if (type === "LOJA") {
     const cnpjSolicitado = req.query.cnpj as string;
     if (lojaCnpj !== cnpjSolicitado) {
       return res.status(403).json({ error: "Acesso negado. Esta loja não está vinculada ao seu usuário." });
@@ -69,7 +76,7 @@ export function requireLojaAccess(req: Request, res: Response, next: NextFunctio
     return next();
   }
 
-  if (type === "REGIONAL") {
+  if (type === "GERENTE") {
     const cnpjSolicitado = req.query.cnpj as string;
     if (!lojaCnpjs.includes(cnpjSolicitado)) {
       return res.status(403).json({ error: "Acesso negado. Esta loja não está na sua região." });
@@ -77,5 +84,5 @@ export function requireLojaAccess(req: Request, res: Response, next: NextFunctio
     return next();
   }
 
-  next(); // ADMIN_3+ acessa qualquer loja
+  next(); // DIRECAO+ acessa qualquer loja
 }

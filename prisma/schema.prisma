@@ -23,11 +23,11 @@ model User {
 }
 
 enum UserType {
-  USER     // visualiza somente a loja vinculada
-  REGIONAL // visualiza somente as lojas atribuídas (múltiplas, só leitura)
-  ADMIN_3  // visualiza todas as lojas (leitura)
-  ADMIN_2  // ADMIN_3 + gerencia metas
-  ADMIN_1  // ADMIN_2 + gerencia usuários
+  LOJA          // visualiza somente a loja vinculada
+  GERENTE       // visualiza somente as lojas da sua região (só leitura)
+  DIRECAO       // visualiza todas as lojas + comparativo de regiões (só leitura)
+  ADMINISTRATIVO // DIRECAO + gerencia metas
+  TI            // acesso total: metas, lojas, usuários e regiões
 }
 
 model Loja {

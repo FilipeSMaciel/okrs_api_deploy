@@ -116,8 +116,8 @@ router.get("/me", authenticateToken, async (req, res) => {
   }
 });
 
-// ─── GET /auth/lojas  (ADMIN_1) ─────────────────────────────────────────────
-router.get("/lojas", authenticateToken, requireLevel("ADMIN_1"), async (_req, res) => {
+// ─── GET /auth/lojas  (TI) ─────────────────────────────────────────────────
+router.get("/lojas", authenticateToken, requireLevel("TI"), async (_req, res) => {
   try {
     const lojas = await prisma.loja.findMany({
       select:  { id: true, name: true, cnpj: true, cidade: true, sigla: true },
@@ -129,8 +129,8 @@ router.get("/lojas", authenticateToken, requireLevel("ADMIN_1"), async (_req, re
   }
 });
 
-// ─── GET /auth/users  (ADMIN_1) ─────────────────────────────────────────────
-router.get("/users", authenticateToken, requireLevel("ADMIN_1"), async (_req, res) => {
+// ─── GET /auth/users  (TI) ─────────────────────────────────────────────────
+router.get("/users", authenticateToken, requireLevel("TI"), async (_req, res) => {
   try {
     const users = await prisma.user.findMany({
       include: INCLUDE_LOJAS_REGIONAIS,
@@ -142,13 +142,13 @@ router.get("/users", authenticateToken, requireLevel("ADMIN_1"), async (_req, re
   }
 });
 
-// ─── POST /auth/users  (ADMIN_1) ────────────────────────────────────────────
-router.post("/users", authenticateToken, requireLevel("ADMIN_1"), async (req, res) => {
+// ─── POST /auth/users  (TI) ────────────────────────────────────────────────
+router.post("/users", authenticateToken, requireLevel("TI"), async (req, res) => {
   const schema = z.object({
     name:      z.string().min(2),
     email:     z.string().email(),
     password:  z.string().min(6),
-    type:      z.enum(["USER", "REGIONAL", "ADMIN_3", "ADMIN_2", "ADMIN_1"]),
+    type:      z.enum(["LOJA", "GERENTE", "DIRECAO", "ADMINISTRATIVO", "TI"]),
     lojaId:    z.string().uuid().optional().nullable(),
     lojaIds:   z.array(z.string().uuid()).optional(),
     regiaoId:  z.string().uuid().optional().nullable(),
@@ -159,11 +159,11 @@ router.post("/users", authenticateToken, requireLevel("ADMIN_1"), async (req, re
 
   const { name, email, password, type, lojaId, lojaIds, regiaoId } = parsed.data;
 
-  if (type === "USER" && !lojaId) {
-    return res.status(400).json({ error: "Usuários do tipo USER precisam ter uma loja vinculada." });
+  if (type === "LOJA" && !lojaId) {
+    return res.status(400).json({ error: "Usuários do tipo Loja precisam ter uma loja vinculada." });
   }
-  if (type === "REGIONAL" && !regiaoId && (!lojaIds || lojaIds.length === 0)) {
-    return res.status(400).json({ error: "Gerentes regionais precisam ter uma região ou lojas atribuídas." });
+  if (type === "GERENTE" && !regiaoId && (!lojaIds || lojaIds.length === 0)) {
+    return res.status(400).json({ error: "Gerentes precisam ter uma região ou lojas atribuídas." });
   }
 
   try {
@@ -177,7 +177,7 @@ router.post("/users", authenticateToken, requireLevel("ADMIN_1"), async (req, re
         type,
         lojaId:   lojaId   ?? null,
         regiaoId: regiaoId ?? null,
-        ...(type === "REGIONAL" && !regiaoId && lojaIds
+        ...(type === "GERENTE" && !regiaoId && lojaIds
           ? { lojasRegionais: { create: lojaIds.map((id) => ({ lojaId: id })) } }
           : {}),
       },
@@ -191,12 +191,12 @@ router.post("/users", authenticateToken, requireLevel("ADMIN_1"), async (req, re
   }
 });
 
-// ─── PATCH /auth/users/:id  (ADMIN_1) ───────────────────────────────────────
-router.patch("/users/:id", authenticateToken, requireLevel("ADMIN_1"), async (req, res) => {
+// ─── PATCH /auth/users/:id  (TI) ───────────────────────────────────────────
+router.patch("/users/:id", authenticateToken, requireLevel("TI"), async (req, res) => {
   const schema = z.object({
     name:      z.string().min(2).optional(),
     password:  z.string().min(6).optional(),
-    type:      z.enum(["USER", "REGIONAL", "ADMIN_3", "ADMIN_2", "ADMIN_1"]).optional(),
+    type:      z.enum(["LOJA", "GERENTE", "DIRECAO", "ADMINISTRATIVO", "TI"]).optional(),
     lojaId:    z.string().uuid().nullable().optional(),
     lojaIds:   z.array(z.string().uuid()).optional(),
     regiaoId:  z.string().uuid().nullable().optional(),
@@ -243,8 +243,8 @@ router.patch("/users/:id", authenticateToken, requireLevel("ADMIN_1"), async (re
   }
 });
 
-// ─── PUT /auth/users/:id/lojas  (ADMIN_1) — redefine lojas do regional ──────
-router.put("/users/:id/lojas", authenticateToken, requireLevel("ADMIN_1"), async (req, res) => {
+// ─── PUT /auth/users/:id/lojas  (TI) — redefine lojas do gerente ───────────
+router.put("/users/:id/lojas", authenticateToken, requireLevel("TI"), async (req, res) => {
   const schema = z.object({ lojaIds: z.array(z.string().uuid()).min(1) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -267,8 +267,8 @@ router.put("/users/:id/lojas", authenticateToken, requireLevel("ADMIN_1"), async
   }
 });
 
-// ─── GET /auth/regioes  (ADMIN_1) ───────────────────────────────────────────
-router.get("/regioes", authenticateToken, requireLevel("ADMIN_1"), async (_req, res) => {
+// ─── GET /auth/regioes  (TI) ────────────────────────────────────────────────
+router.get("/regioes", authenticateToken, requireLevel("TI"), async (_req, res) => {
   try {
     const regioes = await prisma.regiao.findMany({
       include: { lojas: { include: { loja: { select: LOJA_SELECT } } } },
@@ -280,8 +280,8 @@ router.get("/regioes", authenticateToken, requireLevel("ADMIN_1"), async (_req, 
   }
 });
 
-// ─── POST /auth/regioes  (ADMIN_1) ──────────────────────────────────────────
-router.post("/regioes", authenticateToken, requireLevel("ADMIN_1"), async (req, res) => {
+// ─── POST /auth/regioes  (TI) ───────────────────────────────────────────────
+router.post("/regioes", authenticateToken, requireLevel("TI"), async (req, res) => {
   const schema = z.object({
     nome:    z.string().min(2),
     lojaIds: z.array(z.string().uuid()).min(1),
@@ -305,8 +305,8 @@ router.post("/regioes", authenticateToken, requireLevel("ADMIN_1"), async (req, 
   }
 });
 
-// ─── PATCH /auth/regioes/:id  (ADMIN_1) ─────────────────────────────────────
-router.patch("/regioes/:id", authenticateToken, requireLevel("ADMIN_1"), async (req, res) => {
+// ─── PATCH /auth/regioes/:id  (TI) ──────────────────────────────────────────
+router.patch("/regioes/:id", authenticateToken, requireLevel("TI"), async (req, res) => {
   const schema = z.object({
     nome:    z.string().min(2).optional(),
     lojaIds: z.array(z.string().uuid()).min(1).optional(),
@@ -337,8 +337,8 @@ router.patch("/regioes/:id", authenticateToken, requireLevel("ADMIN_1"), async (
   }
 });
 
-// ─── DELETE /auth/regioes/:id  (ADMIN_1) ────────────────────────────────────
-router.delete("/regioes/:id", authenticateToken, requireLevel("ADMIN_1"), async (req, res) => {
+// ─── DELETE /auth/regioes/:id  (TI) ─────────────────────────────────────────
+router.delete("/regioes/:id", authenticateToken, requireLevel("TI"), async (req, res) => {
   try {
     await prisma.regiao.delete({ where: { id: req.params.id as string } });
     return res.status(204).send();
@@ -348,8 +348,8 @@ router.delete("/regioes/:id", authenticateToken, requireLevel("ADMIN_1"), async 
   }
 });
 
-// ─── DELETE /auth/users/:id  (ADMIN_1) ──────────────────────────────────────
-router.delete("/users/:id", authenticateToken, requireLevel("ADMIN_1"), async (req, res) => {
+// ─── DELETE /auth/users/:id  (TI) ───────────────────────────────────────────
+router.delete("/users/:id", authenticateToken, requireLevel("TI"), async (req, res) => {
   if (req.user!.sub === req.params.id) {
     return res.status(400).json({ error: "Você não pode excluir o próprio usuário." });
   }
